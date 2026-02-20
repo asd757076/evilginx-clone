@@ -10,7 +10,7 @@ import os
 import re
 import urllib3
 
-# تعطيل تحذيرات SSL غير الآمنة لضمان العمل بسلاسة خلف البروكسي
+# تعطيل تحذيرات SSL لضمان العمل بسلاسة خلف البروكسي
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ======================== الإعدادات الخاصة بك ========================
@@ -18,9 +18,9 @@ TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8554468568:AAFvQJVSo6
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '1367401179')
 # ====================================================================
 
-# تحديد مجلد القوالب لـ Flask لضمان عمل لوحة التحكم
 app = Flask(__name__, template_folder='templates')
 app.secret_key = os.urandom(24).hex()
+
 
 # إعداد التسجيل (Logging)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
